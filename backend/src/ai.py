@@ -12,6 +12,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic import AliasChoices, BaseModel, Field, field_validator
@@ -377,12 +378,26 @@ def _build_transcript_model(runtime_config: Config) -> Model | str:
                 "Use the format openai:<model>, for example openai:qwen3.6-27b-vllm-dual."
             )
 
+        # Many OpenAI-compatible endpoints (LiteLLM proxy, vLLM serving Qwen,
+        # Together, OpenRouter, …) wrap structured output in markdown fences
+        # when pydantic-ai's native json_schema response_format is sent. pydantic-ai's
+        # native validator then rejects the response even after retries.
+        # Disable native schema output so pydantic-ai falls back to "prompted"
+        # mode, which uses response_format={type:json_object} (the simpler hint
+        # Qwen honors correctly) and extracts JSON via regex.
+        proxy_profile = OpenAIModelProfile(
+            supports_json_schema_output=False,
+            supports_json_object_output=True,
+            default_structured_output_mode="prompted",
+        )
+
         return OpenAIModel(
             provider_model_name,
             provider=OpenAIProvider(
                 base_url=runtime_config.openai_base_url,
                 api_key=runtime_config.openai_api_key,
             ),
+            profile=proxy_profile,
         )
 
     return runtime_config.llm
@@ -396,6 +411,7 @@ def get_transcript_agent() -> Agent[None, TranscriptAnalysis]:
     signature = (
         runtime_config.llm,
         runtime_config.openai_api_key,
+        runtime_config.openai_base_url,
         runtime_config.google_api_key,
         runtime_config.anthropic_api_key,
         runtime_config.ollama_base_url,
@@ -407,8 +423,15 @@ def get_transcript_agent() -> Agent[None, TranscriptAnalysis]:
         if config_error:
             raise RuntimeError(config_error)
 
+        # When the LLM is an OpenAI-compatible endpoint (LiteLLM proxy, vLLM,
+        # Together, …) the model's profile in _build_transcript_model disables
+        # native schema output, which forces pydantic-ai into "prompted" mode.
+        # That mode automatically sets response_format={type:json_object} on the
+        # OpenAI request, which Qwen honors correctly (raw JSON, no fences).
+        transcript_model = _build_transcript_model(runtime_config)
+
         _transcript_agent = Agent[None, TranscriptAnalysis](
-            model=_build_transcript_model(runtime_config),
+            model=transcript_model,
             output_type=TranscriptAnalysis,
             system_prompt=transcript_analysis_system_prompt,
             # Some local Ollama/OpenAI-compatible endpoints can return formatted
