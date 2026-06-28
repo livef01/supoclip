@@ -198,12 +198,13 @@ services:
       backend:
         condition: service_healthy
 
-  # Redis for caching and job queues (useful for video processing)
+  # Redis for caching and job queues (internal only — no host port mapping
+  # because the openhands-lxc host already has a system Redis on 127.0.0.1:6379).
   redis:
     image: redis:7-alpine
     container_name: supoclip-redis
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     command:
