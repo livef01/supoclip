@@ -12,3 +12,6 @@ frontend/e2e/.seed.json
 backend/demo_clips/
 backend/demo_clips_*.log
 backend/run_demo.py
+
+# local deployment notes (per-host, never share)
+SETUP_GUIDE.md

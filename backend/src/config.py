@@ -13,6 +13,7 @@ DOCKER_OLLAMA_BASE_URL = "http://host.docker.internal:11434/v1"
 class Config:
     def __init__(self):
         self.openai_api_key = self._get_runtime_setting("OPENAI_API_KEY")
+        self.openai_base_url = self._get_runtime_setting("OPENAI_BASE_URL")
         self.anthropic_api_key = self._get_runtime_setting("ANTHROPIC_API_KEY")
         self.google_api_key = self._get_runtime_setting("GOOGLE_API_KEY")
         self.youtube_data_api_key = self._get_runtime_setting("YOUTUBE_DATA_API_KEY")
@@ -114,6 +115,7 @@ class Config:
             "ASSEMBLY_AI_API_KEY": self.assembly_ai_api_key,
             "LLM": self.llm,
             "OPENAI_API_KEY": self.openai_api_key,
+            "OPENAI_BASE_URL": self.openai_base_url,
             "GOOGLE_API_KEY": self.google_api_key,
             "ANTHROPIC_API_KEY": self.anthropic_api_key,
             "OLLAMA_BASE_URL": self.ollama_base_url,

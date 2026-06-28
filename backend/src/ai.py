@@ -11,7 +11,9 @@ import re
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.ollama import OllamaModel
+from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.ollama import OllamaProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from .config import Config, get_config
@@ -350,22 +352,40 @@ def _get_missing_llm_key_error(model_name: str, runtime_config: Config) -> Optio
 
 def _build_transcript_model(runtime_config: Config) -> Model | str:
     provider, provider_model_name = _split_llm_name(runtime_config.llm)
-    if provider != "ollama":
-        return runtime_config.llm
 
-    if not provider_model_name:
-        raise RuntimeError(
-            "Selected LLM provider is Ollama, but no model name was provided. "
-            "Use the format ollama:<model>, for example ollama:gpt-oss:20b."
+    if provider == "ollama":
+        if not provider_model_name:
+            raise RuntimeError(
+                "Selected LLM provider is Ollama, but no model name was provided. "
+                "Use the format ollama:<model>, for example ollama:gpt-oss:20b."
+            )
+
+        return OllamaModel(
+            provider_model_name,
+            provider=OllamaProvider(
+                base_url=runtime_config.resolve_ollama_base_url(),
+                api_key=runtime_config.ollama_api_key,
+            ),
         )
 
-    return OllamaModel(
-        provider_model_name,
-        provider=OllamaProvider(
-            base_url=runtime_config.resolve_ollama_base_url(),
-            api_key=runtime_config.ollama_api_key,
-        ),
-    )
+    if provider == "openai" and runtime_config.openai_base_url:
+        # Allow openai:* models to be redirected to any OpenAI-compatible
+        # endpoint (LiteLLM proxy, vLLM OpenAI server, Together, etc.).
+        if not provider_model_name:
+            raise RuntimeError(
+                "Selected LLM provider is OpenAI, but no model name was provided. "
+                "Use the format openai:<model>, for example openai:qwen3.6-27b-vllm-dual."
+            )
+
+        return OpenAIModel(
+            provider_model_name,
+            provider=OpenAIProvider(
+                base_url=runtime_config.openai_base_url,
+                api_key=runtime_config.openai_api_key,
+            ),
+        )
+
+    return runtime_config.llm
 
 
 def get_transcript_agent() -> Agent[None, TranscriptAnalysis]:

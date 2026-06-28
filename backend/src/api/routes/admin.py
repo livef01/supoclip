@@ -37,6 +37,11 @@ SETTING_METADATA = {
         "description": "Required for openai:* models.",
         "input_type": "password",
     },
+    "OPENAI_BASE_URL": {
+        "label": "OpenAI base URL",
+        "description": "Optional OpenAI-compatible endpoint URL (LiteLLM proxy, vLLM, Together, etc.). Leave empty to use api.openai.com.",
+        "input_type": "text",
+    },
     "GOOGLE_API_KEY": {
         "label": "Google API key",
         "description": "Required for google-gla:* models and fallback YouTube metadata.",
