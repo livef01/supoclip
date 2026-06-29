@@ -68,45 +68,34 @@ async def _write_upload_to_disk(
 @router.get("/fonts")
 async def get_available_fonts_route(request: Request):
     """Get list of available fonts."""
-    try:
-        user_id = _get_authenticated_user_id(request)
-        if not FONTS_DIR.exists():
-            return {"fonts": [], "message": "Fonts directory not found"}
+    user_id = _get_authenticated_user_id(request)
+    if not FONTS_DIR.exists():
+        return {"fonts": [], "message": "Fonts directory not found"}
 
-        fonts = list_available_fonts(user_id=user_id)
-        logger.info(f"Found {len(fonts)} available fonts")
-        return {"fonts": fonts}
-
-    except Exception as e:
-        logger.error(f"Error retrieving fonts: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error retrieving fonts: {str(e)}")
+    fonts = list_available_fonts(user_id=user_id)
+    logger.info(f"Found {len(fonts)} available fonts")
+    return {"fonts": fonts}
 
 
 @router.get("/fonts/{font_name}")
 async def get_font_file(font_name: str, request: Request):
     """Serve a specific font file."""
-    try:
-        user_id = _get_authenticated_user_id(request)
-        font_path = find_font_path(font_name, user_id=user_id)
+    user_id = _get_authenticated_user_id(request)
+    font_path = find_font_path(font_name, user_id=user_id)
 
-        if not font_path:
-            raise HTTPException(status_code=404, detail="Font not found")
+    if not font_path:
+        raise HTTPException(status_code=404, detail="Font not found")
 
-        media_type = "font/ttf" if font_path.suffix.lower() == ".ttf" else "font/otf"
+    media_type = "font/ttf" if font_path.suffix.lower() == ".ttf" else "font/otf"
 
-        return FileResponse(
-            path=str(font_path),
-            media_type=media_type,
-            headers={
-                "Cache-Control": "public, max-age=31536000",
-                "Access-Control-Allow-Origin": "*",
-            },
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error serving font {font_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error serving font: {str(e)}")
+    return FileResponse(
+        path=str(font_path),
+        media_type=media_type,
+        headers={
+            "Cache-Control": "public, max-age=31536000",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @router.post("/fonts/upload")
@@ -116,64 +105,56 @@ async def upload_font(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a custom .ttf/.otf font so it appears in the font picker."""
-    try:
-        user_id = _get_authenticated_user_id(request)
-        billing_service = BillingService(db)
-        summary = await billing_service.get_usage_summary(user_id)
-        paid_access = not summary.get("monetization_enabled") or (
-            summary.get("plan") in {"pro", "scale"}
-            and summary.get("subscription_status") in {"active", "trialing"}
+    user_id = _get_authenticated_user_id(request)
+    billing_service = BillingService(db)
+    summary = await billing_service.get_usage_summary(user_id)
+    paid_access = not summary.get("monetization_enabled") or (
+        summary.get("plan") in {"pro", "scale"}
+        and summary.get("subscription_status") in {"active", "trialing"}
+    )
+    if not paid_access:
+        raise HTTPException(
+            status_code=403,
+            detail="Custom font uploads are available for paid plans only",
         )
-        if not paid_access:
-            raise HTTPException(
-                status_code=403,
-                detail="Custom font uploads are available for paid plans only",
-            )
 
-        if not uploaded_file.filename:
-            raise HTTPException(status_code=400, detail="Missing file name")
+    if not uploaded_file.filename:
+        raise HTTPException(status_code=400, detail="Missing file name")
 
-        uploaded_filename = uploaded_file.filename or "font.ttf"
-        extension = Path(uploaded_filename).suffix.lower()
-        if extension not in SUPPORTED_FONT_EXTENSIONS:
-            raise HTTPException(
-                status_code=400, detail="Only .ttf and .otf fonts are supported"
-            )
+    uploaded_filename = uploaded_file.filename or "font.ttf"
+    extension = Path(uploaded_filename).suffix.lower()
+    if extension not in SUPPORTED_FONT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, detail="Only .ttf and .otf fonts are supported"
+        )
 
-        user_fonts_dir = get_user_fonts_dir(user_id)
-        user_fonts_dir.mkdir(parents=True, exist_ok=True)
+    user_fonts_dir = get_user_fonts_dir(user_id)
+    user_fonts_dir.mkdir(parents=True, exist_ok=True)
 
-        original_stem = sanitize_font_stem(uploaded_filename)
-        stored_stem = build_user_font_stem(user_id, original_stem)
-        target_path = user_fonts_dir / f"{stored_stem}{extension}"
-        suffix = 2
-        while target_path.exists():
-            target_path = user_fonts_dir / f"{stored_stem}-{suffix}{extension}"
-            suffix += 1
+    original_stem = sanitize_font_stem(uploaded_filename)
+    stored_stem = build_user_font_stem(user_id, original_stem)
+    target_path = user_fonts_dir / f"{stored_stem}{extension}"
+    suffix = 2
+    while target_path.exists():
+        target_path = user_fonts_dir / f"{stored_stem}-{suffix}{extension}"
+        suffix += 1
 
-        await _write_upload_to_disk(uploaded_file, target_path, MAX_FONT_UPLOAD_BYTES)
+    await _write_upload_to_disk(uploaded_file, target_path, MAX_FONT_UPLOAD_BYTES)
 
-        logger.info(f"Uploaded font: {target_path.name}")
+    logger.info(f"Uploaded font: {target_path.name}")
 
-        return {
-            "font": {
-                "name": target_path.stem,
-                "display_name": original_stem.replace("-", " ")
-                .replace("_", " ")
-                .title(),
-                "filename": target_path.name,
-                "format": extension.lstrip("."),
-                "scope": "user",
-            },
-            "message": "Font uploaded successfully",
-        }
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error uploading font: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error uploading font: {str(e)}")
+    return {
+        "font": {
+            "name": target_path.stem,
+            "display_name": original_stem.replace("-", " ")
+            .replace("_", " ")
+            .title(),
+            "filename": target_path.name,
+            "format": extension.lstrip("."),
+            "scope": "user",
+        },
+        "message": "Font uploaded successfully",
+    }
 
 
 @router.get("/transitions")

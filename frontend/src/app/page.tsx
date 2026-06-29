@@ -236,6 +236,15 @@ export default function Home() {
         cache: "no-store",
       });
       if (!response.ok) {
+        let upstreamDetail = "";
+        try {
+          upstreamDetail = await response.text();
+        } catch {
+          // ignore body read errors; the status code alone is enough for the throw
+        }
+        console.error(
+          `Failed to load fonts (${response.status}): ${upstreamDetail}`,
+        );
         throw new Error(`Failed to load fonts (${response.status})`);
       }
 
