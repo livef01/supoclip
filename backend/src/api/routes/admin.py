@@ -27,6 +27,16 @@ SETTING_METADATA = {
         "description": "Used for video transcription.",
         "input_type": "password",
     },
+    "TRANSCRIPTION_PROVIDER": {
+        "label": "Transcription provider",
+        "description": "whisperx (local faster-whisper, default) or assemblyai. Switch back to assemblyai when the local WhisperX service is offline.",
+        "input_type": "text",
+    },
+    "WHISPERX_BASE_URL": {
+        "label": "WhisperX base URL",
+        "description": "Local WhisperX STT endpoint (e.g. http://100.105.130.81:5000). Only used when transcription provider = whisperx.",
+        "input_type": "text",
+    },
     "LLM": {
         "label": "LLM model",
         "description": "Provider and model, for example openai:gpt-5.2.",

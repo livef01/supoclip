@@ -26,6 +26,18 @@ class Config:
         self.assembly_ai_http_timeout_seconds = int(
             os.getenv("ASSEMBLY_AI_HTTP_TIMEOUT_SECONDS", "900")
         )
+
+        # Transcription backend. Local whisperX (faster-whisper) by default;
+        # set TRANSCRIPTION_PROVIDER=assemblyai to use the original flow.
+        self.transcription_provider = self._normalize_transcription_provider(
+            os.getenv("TRANSCRIPTION_PROVIDER", "whisperx")
+        )
+        self.whisperx_base_url = (
+            os.getenv("WHISPERX_BASE_URL", "http://100.105.130.81:5000").rstrip("/")
+        )
+        self.whisperx_timeout_seconds = int(
+            os.getenv("WHISPERX_TIMEOUT_SECONDS", "1800")
+        )
         self.pexels_api_key = self._get_runtime_setting("PEXELS_API_KEY")
         self.apify_api_token = self._get_runtime_setting("APIFY_API_TOKEN")
         self.youtube_download_provider = self._normalize_youtube_download_provider(
@@ -116,6 +128,8 @@ class Config:
             "LLM": self.llm,
             "OPENAI_API_KEY": self.openai_api_key,
             "OPENAI_BASE_URL": self.openai_base_url,
+            "TRANSCRIPTION_PROVIDER": self.transcription_provider,
+            "WHISPERX_BASE_URL": self.whisperx_base_url,
             "GOOGLE_API_KEY": self.google_api_key,
             "ANTHROPIC_API_KEY": self.anthropic_api_key,
             "OLLAMA_BASE_URL": self.ollama_base_url,
@@ -124,6 +138,17 @@ class Config:
             "APIFY_API_TOKEN": self.apify_api_token,
             "PEXELS_API_KEY": self.pexels_api_key,
         }
+
+    @staticmethod
+    def _normalize_transcription_provider(value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized in {"whisperx", "whisper", "faster-whisper"}:
+            return "whisperx"
+        if normalized in {"assemblyai", "assembly_ai", "aai"}:
+            return "assemblyai"
+        # Fallback to local whisperx when a bogus value is supplied; downstream
+        # code falls back gracefully if the provider isn't reachable.
+        return "whisperx"
 
     @staticmethod
     def _get_bool_env(name: str, default: bool) -> bool:

@@ -182,26 +182,126 @@ def _submit_and_wait_for_assemblyai_transcript(
         time.sleep(aai.settings.polling_interval)
 
 
+def _format_whisperx_segments(segments: List[Dict[str, Any]]) -> List[str]:
+    """Convert whisperX segment dicts to ``[MM:SS - MM:SS] text`` lines.
+
+    Mirrors ``format_transcript_for_analysis`` but skips speaker labels (whisperX
+    doesn't diarize by default — that's a known tradeoff vs AssemblyAI).
+    """
+    formatted: List[str] = []
+    for seg in segments or []:
+        try:
+            start_s = float(seg.get("start", 0))
+            end_s = float(seg.get("end", 0))
+        except (TypeError, ValueError):
+            continue
+        start_ts = f"{int(start_s // 60):02d}:{int(start_s % 60):02d}"
+        end_ts = f"{int(end_s // 60):02d}:{int(end_s % 60):02d}"
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        formatted.append(f"[{start_ts} - {end_ts}] {text}")
+    return formatted
+
+
+def _transcribe_with_whisperx(
+    video_path: Path,
+    base_url: str,
+    timeout_seconds: int,
+) -> List[Dict[str, Any]]:
+    """POST audio to local WhisperX STT service and return the JSON ``segments``.
+
+    Raises ``RuntimeError`` if the service is unreachable or returns an error so
+    the caller can decide whether to fall back to AssemblyAI.
+    """
+    audio_path = _prepare_audio_for_transcription(video_path)
+    logger.info(
+        "WhisperX POST -> %s/transcribe (audio=%s, %.2f MB)",
+        base_url,
+        audio_path.name,
+        audio_path.stat().st_size / (1024 * 1024),
+    )
+    with httpx.Client(timeout=timeout_seconds) as client:
+        with open(audio_path, "rb") as f:
+            response = client.post(
+                f"{base_url}/transcribe",
+                files={"audio": (audio_path.name, f, "audio/mpeg")},
+                data={"vad_filter": "false"},
+            )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"WhisperX returned HTTP {response.status_code}: {response.text[:300]}"
+        )
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"WhisperX response was not valid JSON: {exc}") from exc
+    segments = payload.get("segments") or []
+    logger.info(
+        "WhisperX result: model=%s device=%s duration=%.2fs segments=%d lang=%s(%.2f)",
+        payload.get("model"),
+        payload.get("device"),
+        float(payload.get("duration") or 0.0),
+        len(segments),
+        payload.get("language"),
+        float(payload.get("language_probability") or 0.0),
+    )
+    return segments
+
+
 def get_video_transcript(video_path: Path, speech_model: str = "best") -> str:
-    """Get transcript using AssemblyAI with word-level timing for precise subtitles."""
+    """Get transcript using the configured provider (whisperx or assemblyai)."""
     logger.info(f"Getting transcript for: {video_path}")
 
-    # Configure AssemblyAI
     runtime_config = get_config()
+    provider = runtime_config.transcription_provider
+
+    if provider == "whisperx":
+        try:
+            segments = _transcribe_with_whisperx(
+                video_path,
+                base_url=runtime_config.whisperx_base_url,
+                timeout_seconds=runtime_config.whisperx_timeout_seconds,
+            )
+            formatted_lines = _format_whisperx_segments(segments)
+            result = "\n".join(formatted_lines)
+            logger.info(
+                f"WhisperX transcript formatted: {len(formatted_lines)} segments, {len(result)} chars"
+            )
+            return result
+        except Exception as exc:
+            api_key = runtime_config.assembly_ai_api_key
+            if not api_key:
+                logger.error(
+                    f"WhisperX transcription failed and no AssemblyAI fallback configured: {exc}"
+                )
+                raise
+            logger.warning(
+                f"WhisperX transcription failed ({exc}); falling back to AssemblyAI."
+            )
+            # Fall through to AssemblyAI path below.
+
+    # AssemblyAI path (original flow).
     aai.settings.api_key = runtime_config.assembly_ai_api_key
     aai.settings.http_timeout = runtime_config.assembly_ai_http_timeout_seconds
     transcriber = aai.Transcriber()
 
-    # Request word-level timestamps for precise subtitle sync
-    speech_model_value = aai.SpeechModel.best
+    # Request word-level timestamps for precise subtitle sync.
+    # AssemblyAI deprecated the singular ``speech_model=`` parameter in favor
+    # of ``speech_models=`` (plural, list of model name strings). Map our old
+    # ``best`` / ``nano`` selection onto their new ``universal`` family:
+    #   - ``universal-3-pro`` — best accuracy, performance, language coverage
+    #   - ``universal-2``     — high accuracy for English (was 'nano')
     if speech_model == "nano":
-        speech_model_value = aai.SpeechModel.nano
+        speech_models = ["universal-2"]
+    else:
+        speech_models = ["universal-3-pro"]
 
     config_obj = aai.TranscriptionConfig(
         speaker_labels=True,
         punctuate=True,
         format_text=True,
-        speech_model=speech_model_value,
+        speech_models=speech_models,
     )
 
     try:
